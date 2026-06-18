@@ -96,7 +96,11 @@ fn main() -> Result<()> {
                 .or_else(|| std::env::var("NEXUS_API_KEY").ok())
                 .or_else(|| std::env::var("NEXUSMODS_API_KEY").ok())
                 .filter(|value| !value.trim().is_empty())
-                .ok_or_else(|| anyhow::anyhow!("missing Nexus API key; set nexus_api_key in config or NEXUS_API_KEY"))?;
+                .ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "missing Nexus API key; set nexus_api_key in config or NEXUS_API_KEY"
+                    )
+                })?;
 
             if let Some(expected) = profile.nexus_game_domain.as_deref() {
                 if expected != link.game_domain {

@@ -78,12 +78,14 @@ impl Config {
         }
 
         if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)
-                .with_context(|| format!("failed to create config directory: {}", parent.display()))?;
+            fs::create_dir_all(parent).with_context(|| {
+                format!("failed to create config directory: {}", parent.display())
+            })?;
         }
 
         let text = toml::to_string_pretty(&Self::default_for_cwd()?)?;
-        fs::write(&path, text).with_context(|| format!("failed to write config: {}", path.display()))?;
+        fs::write(&path, text)
+            .with_context(|| format!("failed to write config: {}", path.display()))?;
         Ok(path)
     }
 

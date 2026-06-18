@@ -104,8 +104,12 @@ pub fn list_mods(ctx: &OperationContext) -> Result<Vec<ModEntry>> {
 
 pub fn extract_downloads(ctx: &OperationContext, reporter: &mut impl Reporter) -> Result<()> {
     require_dir(&ctx.profile.downloads, "downloads directory")?;
-    fs::create_dir_all(&ctx.profile.library)
-        .with_context(|| format!("failed to create library: {}", ctx.profile.library.display()))?;
+    fs::create_dir_all(&ctx.profile.library).with_context(|| {
+        format!(
+            "failed to create library: {}",
+            ctx.profile.library.display()
+        )
+    })?;
 
     let archives = archives_in(&ctx.profile.downloads)?;
     if archives.is_empty() {
@@ -128,7 +132,11 @@ pub fn extract_downloads(ctx: &OperationContext, reporter: &mut impl Reporter) -
             .context("archive stem is not valid UTF-8")?;
         let outdir = ctx.profile.library.join(mod_name);
 
-        if outdir.exists() || outdir.with_file_name(format!("{mod_name}.disabled")).exists() {
+        if outdir.exists()
+            || outdir
+                .with_file_name(format!("{mod_name}.disabled"))
+                .exists()
+        {
             reporter.warn(format!("skipping existing mod: {mod_name}"));
             continue;
         }
@@ -168,7 +176,10 @@ pub fn enable_mod(ctx: &OperationContext, name: &str, reporter: &mut impl Report
     }
 
     if enabled.exists() {
-        bail!("enable target exists and is not a directory: {}", enabled.display());
+        bail!(
+            "enable target exists and is not a directory: {}",
+            enabled.display()
+        );
     }
     if disabled.exists() && !disabled.is_dir() {
         bail!(
@@ -240,8 +251,12 @@ pub fn check_library(ctx: &OperationContext, reporter: &mut impl Reporter) -> Re
 
 pub fn assemble(ctx: &OperationContext, reporter: &mut impl Reporter) -> Result<()> {
     require_dir(&ctx.profile.game_source, "game root")?;
-    fs::create_dir_all(&ctx.profile.library)
-        .with_context(|| format!("failed to create library: {}", ctx.profile.library.display()))?;
+    fs::create_dir_all(&ctx.profile.library).with_context(|| {
+        format!(
+            "failed to create library: {}",
+            ctx.profile.library.display()
+        )
+    })?;
     require_safe_output(ctx)?;
     require_cow_output_fs(ctx)?;
 
@@ -252,8 +267,9 @@ pub fn assemble(ctx: &OperationContext, reporter: &mut impl Reporter) -> Result<
     generate_overwrite(ctx, true, reporter)?;
 
     if ctx.profile.output.exists() {
-        fs::remove_dir_all(&ctx.profile.output)
-            .with_context(|| format!("failed to remove output: {}", ctx.profile.output.display()))?;
+        fs::remove_dir_all(&ctx.profile.output).with_context(|| {
+            format!("failed to remove output: {}", ctx.profile.output.display())
+        })?;
     }
     fs::create_dir_all(&ctx.profile.output)
         .with_context(|| format!("failed to create output: {}", ctx.profile.output.display()))?;
@@ -265,7 +281,11 @@ pub fn assemble(ctx: &OperationContext, reporter: &mut impl Reporter) -> Result<
     copy_dir_contents(ctx, &ctx.profile.game_source, &ctx.profile.output)?;
     ctx.runner.run(
         "chmod",
-        &[OsStr::new("-R"), OsStr::new("u+w"), ctx.profile.output.as_os_str()],
+        &[
+            OsStr::new("-R"),
+            OsStr::new("u+w"),
+            ctx.profile.output.as_os_str(),
+        ],
     )?;
 
     let enabled = enabled_packages(ctx)?;
@@ -277,7 +297,10 @@ pub fn assemble(ctx: &OperationContext, reporter: &mut impl Reporter) -> Result<
 
     let total = enabled.len();
     for (index, package) in enabled.iter().enumerate() {
-        let name = package.file_name().and_then(OsStr::to_str).unwrap_or("<unknown>");
+        let name = package
+            .file_name()
+            .and_then(OsStr::to_str)
+            .unwrap_or("<unknown>");
         reporter.line(format!("Assembling mod {}/{}: {name}", index + 1, total));
         copy_dir_contents(ctx, package, &ctx.profile.output)?;
     }
@@ -290,11 +313,16 @@ pub fn save_manifest(ctx: &OperationContext, reporter: &mut impl Reporter) -> Re
     reporter.line("Recording game state...");
     let manifest = gen_manifest(ctx)?;
     if let Some(parent) = ctx.profile.manifest.parent() {
-        fs::create_dir_all(parent)
-            .with_context(|| format!("failed to create manifest directory: {}", parent.display()))?;
+        fs::create_dir_all(parent).with_context(|| {
+            format!("failed to create manifest directory: {}", parent.display())
+        })?;
     }
-    let mut file = File::create(&ctx.profile.manifest)
-        .with_context(|| format!("failed to write manifest: {}", ctx.profile.manifest.display()))?;
+    let mut file = File::create(&ctx.profile.manifest).with_context(|| {
+        format!(
+            "failed to write manifest: {}",
+            ctx.profile.manifest.display()
+        )
+    })?;
     for line in manifest {
         writeln!(file, "{line}")?;
     }
@@ -304,8 +332,12 @@ pub fn save_manifest(ctx: &OperationContext, reporter: &mut impl Reporter) -> Re
 
 pub fn manifest_changes(ctx: &OperationContext) -> Result<Vec<String>> {
     require_file(&ctx.profile.manifest, "manifest")?;
-    let saved = fs::read_to_string(&ctx.profile.manifest)
-        .with_context(|| format!("failed to read manifest: {}", ctx.profile.manifest.display()))?;
+    let saved = fs::read_to_string(&ctx.profile.manifest).with_context(|| {
+        format!(
+            "failed to read manifest: {}",
+            ctx.profile.manifest.display()
+        )
+    })?;
     let saved: BTreeSet<_> = saved.lines().map(ToOwned::to_owned).collect();
     Ok(gen_manifest(ctx)?
         .into_iter()
@@ -330,7 +362,10 @@ pub fn generate_overwrite(
             reporter.warn("manifest exists but modded game directory is missing; skipping overwrite generation");
             return Ok(());
         }
-        bail!("missing modded game directory: {}", ctx.profile.output.display());
+        bail!(
+            "missing modded game directory: {}",
+            ctx.profile.output.display()
+        );
     }
 
     let changed_files = overwrite_files(ctx)?;
@@ -341,13 +376,20 @@ pub fn generate_overwrite(
         return Ok(());
     }
 
-    fs::create_dir_all(&ctx.profile.library)
-        .with_context(|| format!("failed to create library: {}", ctx.profile.library.display()))?;
+    fs::create_dir_all(&ctx.profile.library).with_context(|| {
+        format!(
+            "failed to create library: {}",
+            ctx.profile.library.display()
+        )
+    })?;
     let overwrite_mod = ctx
         .profile
         .library
         .join(format!("zzzz-overwrite-{}", unix_timestamp()?));
-    reporter.line(format!("Packing overwrite mod: {}", overwrite_mod.display()));
+    reporter.line(format!(
+        "Packing overwrite mod: {}",
+        overwrite_mod.display()
+    ));
 
     for file in changed_files {
         let source = ctx.profile.output.join(&file);
@@ -356,8 +398,10 @@ pub fn generate_overwrite(
             fs::create_dir_all(parent)
                 .with_context(|| format!("failed to create directory: {}", parent.display()))?;
         }
-        ctx.runner
-            .run("cp", &[OsStr::new("-a"), source.as_os_str(), target.as_os_str()])?;
+        ctx.runner.run(
+            "cp",
+            &[OsStr::new("-a"), source.as_os_str(), target.as_os_str()],
+        )?;
         reporter.line(format!("  + {}", file.display()));
     }
 
@@ -482,7 +526,10 @@ fn check_package_structure(ctx: &OperationContext, reporter: &mut impl Reporter)
             continue;
         }
 
-        if !KNOWN_PACKAGE_ROOTS.iter().any(|root| path.join(root).is_dir()) {
+        if !KNOWN_PACKAGE_ROOTS
+            .iter()
+            .any(|root| path.join(root).is_dir())
+        {
             reporter.line(format!("error: unrecognized mod structure: {name}"));
             ok = false;
         }
@@ -593,7 +640,10 @@ fn gen_manifest(ctx: &OperationContext) -> Result<Vec<String>> {
     require_dir(&ctx.profile.output, "modded game directory")?;
     let mut lines = Vec::new();
 
-    for entry in WalkDir::new(&ctx.profile.output).min_depth(1).follow_links(false) {
+    for entry in WalkDir::new(&ctx.profile.output)
+        .min_depth(1)
+        .follow_links(false)
+    {
         let entry = entry?;
         let path = entry.path();
         let metadata = fs::symlink_metadata(path)?;

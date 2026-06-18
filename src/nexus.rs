@@ -92,8 +92,12 @@ pub fn download_nxm(
     link: &NxmLink,
     reporter: &mut impl Reporter,
 ) -> Result<PathBuf> {
-    fs::create_dir_all(&profile.downloads)
-        .with_context(|| format!("failed to create downloads: {}", profile.downloads.display()))?;
+    fs::create_dir_all(&profile.downloads).with_context(|| {
+        format!(
+            "failed to create downloads: {}",
+            profile.downloads.display()
+        )
+    })?;
 
     let client = nexus_client(api_key)?;
     reporter.line(format!(
@@ -134,7 +138,8 @@ fn nexus_client(api_key: &str) -> Result<Client> {
     let mut headers = HeaderMap::new();
     headers.insert(
         "apikey",
-        HeaderValue::from_str(api_key.trim()).context("Nexus API key is not a valid header value")?,
+        HeaderValue::from_str(api_key.trim())
+            .context("Nexus API key is not a valid header value")?,
     );
     Ok(Client::builder()
         .default_headers(headers)
@@ -211,7 +216,10 @@ fn unique_path(path: &Path) -> PathBuf {
     }
 
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
-    let stem = path.file_stem().and_then(OsStr::to_str).unwrap_or("download");
+    let stem = path
+        .file_stem()
+        .and_then(OsStr::to_str)
+        .unwrap_or("download");
     let extension = path.extension().and_then(OsStr::to_str);
 
     for index in 1.. {
@@ -226,4 +234,28 @@ fn unique_path(path: &Path) -> PathBuf {
     }
 
     unreachable!("infinite range always returns")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::NxmLink;
+
+    #[test]
+    fn parses_nxm_links_with_key_and_expiry() {
+        let link = NxmLink::parse(
+            "nxm://cyberpunk2077/mods/123/files/456?key=abc123&expires=1893456000&user_id=99",
+        )
+        .unwrap();
+
+        assert_eq!(link.game_domain, "cyberpunk2077");
+        assert_eq!(link.mod_id, 123);
+        assert_eq!(link.file_id, 456);
+        assert_eq!(link.key.as_deref(), Some("abc123"));
+        assert_eq!(link.expires.as_deref(), Some("1893456000"));
+    }
+
+    #[test]
+    fn rejects_non_nxm_links() {
+        assert!(NxmLink::parse("https://example.com/mods/123/files/456").is_err());
+    }
 }

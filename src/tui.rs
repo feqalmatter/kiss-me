@@ -165,7 +165,8 @@ impl App {
             Button::RemoveReadmes => ops::remove_readmes(&ctx, &mut self.reporter()),
             Button::DownloadNxm => {
                 self.mode = Mode::NxmInput(String::new());
-                self.output.push("Paste an nxm:// link, then press Enter.".to_string());
+                self.output
+                    .push("Paste an nxm:// link, then press Enter.".to_string());
                 Ok(())
             }
             Button::Refresh => self.refresh_mods(),
@@ -317,11 +318,20 @@ fn wrap_index(index: usize, len: usize, delta: isize) -> usize {
 fn draw(frame: &mut Frame<'_>, app: &mut App) {
     let root = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Length(3), Constraint::Min(8), Constraint::Length(10)])
+        .constraints([
+            Constraint::Length(3),
+            Constraint::Min(8),
+            Constraint::Length(10),
+        ])
         .split(frame.area());
 
     let header = Paragraph::new(Line::from(vec![
-        Span::styled("kiss-me", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            "kiss-me",
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        ),
         Span::raw("  "),
         Span::raw(app.ctx.profile.game_source.display().to_string()),
     ]))
@@ -344,7 +354,9 @@ fn draw(frame: &mut Frame<'_>, app: &mut App) {
 
 fn draw_mods(frame: &mut Frame<'_>, app: &App, area: Rect) {
     let items: Vec<_> = if app.mods.is_empty() {
-        vec![ListItem::new("No mods found. Run extract-downloads or add Library entries.")]
+        vec![ListItem::new(
+            "No mods found. Run extract-downloads or add Library entries.",
+        )]
     } else {
         app.mods
             .iter()
