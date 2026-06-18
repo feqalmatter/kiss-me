@@ -263,7 +263,7 @@ assemble() {
 		die "fix library errors before assembling"
 	fi
 
-	maybe_generate_overwrite
+	generate_overwrite --optional
 
 	local assembled="$OUTPUT"
 
@@ -323,12 +323,38 @@ diff_manifest() {
 	manifest_changes
 }
 
-create_overwrite() {
+overwrite_files() {
+	manifest_changes | awk -F '\t' '$1 != "d" { print $2 }'
+}
+
+generate_overwrite() {
+	local optional=false
+	if (($# > 0)); then
+		case "$1" in
+			--optional) optional=true ;;
+			*) die "unknown generate-overwrite option: $1" ;;
+		esac
+	fi
+
+	if [[ ! -f "$MANIFEST" ]]; then
+		[[ "$optional" == true ]] && return 0
+		die "missing manifest: $MANIFEST"
+	fi
+
+	if [[ ! -d "$OUTPUT" ]]; then
+		if [[ "$optional" == true ]]; then
+			warn "manifest exists but modded game directory is missing; skipping overwrite generation"
+			return 0
+		fi
+
+		die "missing modded game directory: $OUTPUT"
+	fi
+
 	local changed_files=()
-	mapfile -t changed_files < <(manifest_changes | awk -F '\t' '$1 != "d" { print $2 }')
+	mapfile -t changed_files < <(overwrite_files)
 
 	if ((${#changed_files[@]} == 0)); then
-		echo "Game folder appears unchanged; nothing to pack."
+		[[ "$optional" == true ]] || echo "Game folder appears unchanged; nothing to pack."
 		return
 	fi
 
@@ -346,23 +372,6 @@ create_overwrite() {
 		cp -a -- "$OUTPUT/$file" "$overwrite_mod/$file"
 		printf '  + %s\n' "$file"
 	done
-}
-
-maybe_generate_overwrite() {
-	[[ -f "$MANIFEST" ]] || return 0
-
-	if [[ ! -d "$OUTPUT" ]]; then
-		warn "manifest exists but modded game directory is missing; skipping overwrite generation"
-		return 0
-	fi
-
-	create_overwrite
-}
-
-generate_overwrite() {
-	require_manifest
-	require_dir "$OUTPUT" "modded game directory"
-	create_overwrite
 }
 
 main "$@"
