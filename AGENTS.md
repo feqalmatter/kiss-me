@@ -30,10 +30,22 @@ Scope of this section: durable, non-obvious context for the Rust TUI branch. Sta
   interactive terminal. For manual testing, run it inside a desktop terminal emulator, not via piped
   stdout. Keys: `Tab` switches panes, arrows/`j`/`k` move, `Space` toggles the selected mod, `Enter`
   runs the focused command, `q`/`Esc` quits.
-- **`assemble` / `generate-overwrite` cannot run in this VM.** They require the `OUTPUT` parent to sit
-  on a reflink-friendly filesystem (`btrfs`/`zfs`/`xfs`/`bcachefs`) because they copy the game with
-  `cp --reflink=auto`. The cloud VM's working dirs are on `overlay`, so these commands fail the
-  filesystem precheck by design. Mod enable/disable/list/check-library work fine.
+- **`assemble` / `generate-overwrite` need a reflink-friendly `OUTPUT`.** They require the `OUTPUT`
+  parent to sit on `btrfs`/`zfs`/`xfs`/`bcachefs` because they copy the game with `cp --reflink=auto`.
+  The cloud VM's working dirs are on `overlay`, so these commands fail the filesystem precheck by
+  default. To exercise them here, create a loopback reflink filesystem and point `OUTPUT` at it
+  (one-off; does not survive VM restarts, so keep it out of the startup script):
+
+  ```bash
+  sudo apt-get install -y xfsprogs
+  sudo fallocate -l 2G /var/tmp/cow.img
+  sudo mkfs.xfs -m reflink=1 -q /var/tmp/cow.img
+  sudo mkdir -p /mnt/cow && sudo mount -o loop /var/tmp/cow.img /mnt/cow
+  sudo chown "$(id -u):$(id -g)" /mnt/cow
+  OUTPUT=/mnt/cow/game.modded cargo run -- assemble   # or export OUTPUT
+  ```
+
+  Mod enable/disable/list/check-library work without any of this.
 - **`cargo fmt --check` reports diffs** against the committed `src/tui.rs` (it is not rustfmt-clean).
   This is pre-existing; do not reformat unrelated code just to satisfy the check.
 - **Config resolution order:** `--config` flag, then `$KISS_ME_CONFIG`, then `./kiss-me.toml`, then
