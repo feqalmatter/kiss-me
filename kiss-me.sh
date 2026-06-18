@@ -1,228 +1,368 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # SPDX-License-Identifier: GLWTPL
 
 # KISS mod enabler <kiss-me.sh>
 # feqalmatter, 2026
 
-cd -- "$(dirname -- "${BASH_SOURCE[0]}")"
+set -Eeuo pipefail
 shopt -s nullglob
+
+SCRIPT_NAME="${0##*/}"
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+cd -- "$SCRIPT_DIR" || exit
 
 ### Parameters ###
 
-GAME_SOURCE="$HOME/Games/Heroic/Cyberpunk 2077"
-LIBRARY="$PWD/Library"
-DOWNLOADS="$PWD/Downloads"
-OUTPUT="$GAME_SOURCE.modded"
-MANIFEST="$PWD/.manifest"
+GAME_SOURCE="${GAME_SOURCE:-$HOME/Games/Heroic/Cyberpunk 2077}"
+LIBRARY="${LIBRARY:-$SCRIPT_DIR/Library}"
+DOWNLOADS="${DOWNLOADS:-$SCRIPT_DIR/Downloads}"
+OUTPUT="${OUTPUT:-$GAME_SOURCE.modded}"
+MANIFEST="${MANIFEST:-$SCRIPT_DIR/.manifest}"
 
 ##################
 
+if [[ -t 2 ]]; then
+	RED=$'\e[31m'
+	YELLOW=$'\e[33m'
+	RESET=$'\e[0m'
+else
+	RED=''
+	YELLOW=''
+	RESET=''
+fi
+
 usage() {
-	echo "usage: $(basename "${BASH_SOURCE[0]}") <command>"
-	echo
-	echo "command is one of:"
-	echo "  assemble"
-	echo "  generate_overwrite"
-	echo "  save_manifest"
-	echo "  diff_manifest"
-	echo "  extract_downloads"
-	echo "  check_library"
-	echo "  remove_readmes"
-	echo "  help"
+	printf 'usage: %s <command>\n\n' "$SCRIPT_NAME"
+	printf 'commands:\n'
+	printf '  assemble            build a fresh modded game directory\n'
+	printf '  extract-downloads   unpack archives from Downloads into Library\n'
+	printf '  check-library       check enabled mod directory structure\n'
+	printf '  generate-overwrite  pack local game changes as an overwrite mod\n'
+	printf '  save-manifest       record the current modded game state\n'
+	printf '  diff-manifest       show changes since the saved manifest\n'
+	printf '  remove-readmes      remove top-level .txt files from mod packages\n'
+	printf '  help                show this help\n\n'
+	printf 'environment overrides:\n'
+	printf '  GAME_SOURCE=%s\n' "$GAME_SOURCE"
+	printf '  LIBRARY=%s\n' "$LIBRARY"
+	printf '  DOWNLOADS=%s\n' "$DOWNLOADS"
+	printf '  OUTPUT=%s\n' "$OUTPUT"
+	printf '  MANIFEST=%s\n' "$MANIFEST"
+}
+
+die() {
+	printf '%serror:%s %s\n' "$RED" "$RESET" "$*" >&2
+	exit 1
+}
+
+warn() {
+	printf '%swarn:%s %s\n' "$YELLOW" "$RESET" "$*" >&2
+}
+
+require_command() {
+	local cmd=$1
+	command -v "$cmd" >/dev/null || die "missing command: $cmd"
+}
+
+require_dir() {
+	local dir=$1
+	local label=$2
+
+	[[ -d "$dir" ]] || die "missing $label: $dir"
+}
+
+enabled_packages() {
+	find "$LIBRARY" -maxdepth 1 -mindepth 1 -type d ! -name '*.disabled'
+}
+
+known_package_root() {
+	local package=$1
+	local root
+
+	for root in archive bin r6 red4ext engine mods; do
+		[[ -d "$package/$root" ]] && return 0
+	done
+
+	return 1
 }
 
 main() {
-	[[ -n "$2" ]] && usage && exit 69
+	if (($# == 0)); then
+		usage
+		exit 1
+	fi
+
+	if (($# > 1)); then
+		usage >&2
+		die "too many arguments"
+	fi
 
 	case "$1" in
 		assemble) assemble ;;
-		gen_overwrite) gen_overwrite -i ;;
-		save_manifest) save_manifest ;;
-		diff_manifest) diff_manifest ;;
-		extract_downloads) extract ;;
-		check_library) check_package_structure ;;
-		remove_readmes) remove_readmes ;;
-		help) usage ;;
-		*) usage; exit 69 ;;
+		extract-downloads) extract_downloads ;;
+		check-library) check_library ;;
+		generate-overwrite) generate_overwrite ;;
+		save-manifest) save_manifest ;;
+		diff-manifest) diff_manifest ;;
+		remove-readmes) remove_readmes ;;
+		help | -h | --help) usage ;;
+		*)
+			usage >&2
+			die "unknown command: $1"
+			;;
 	esac
 }
 
-extract() {
-	local prereqs=(
-		"unrar"
-		"unzip"
-		"7z"
-	)
+extract_archive() {
+	local archive=$1
+	local outdir=$2
+	local ext=${archive##*.}
 
-	local error=false
-	for cmd in "${prereqs[@]}"; do
-		if ! command -v "$cmd" >/dev/null; then
-			echo "missing command: $cmd"
-			error=true
-		fi
-	done
-	$error && exit 69
+	ext=${ext,,}
 
-	local i_total=0
-	local a_new=()
-	for archive in "$DOWNLOADS"/*.{zip,7z,rar}; do
-		((i_total++))
-		filename="$(basename "$archive")"
+	case "$ext" in
+		zip)
+			require_command unzip
+			unzip -q "$archive" -d "$outdir"
+			;;
+		7z)
+			require_command 7z
+			7z x -y -o"$outdir" "$archive" >/dev/null
+			;;
+		rar)
+			require_command unrar
+			unrar x -idq -op"$outdir" "$archive"
+			;;
+		*) die "unsupported archive type: $archive" ;;
+	esac
+}
+
+extract_downloads() {
+	require_dir "$DOWNLOADS" "downloads directory"
+	mkdir -p -- "$LIBRARY"
+
+	local archives=("$DOWNLOADS"/*.{zip,ZIP,7z,7Z,rar,RAR})
+	local added=()
+	local archive filename mod outdir
+
+	if ((${#archives[@]} == 0)); then
+		echo "No archives found in $DOWNLOADS."
+		return
+	fi
+
+	for archive in "${archives[@]}"; do
+		filename="$(basename -- "$archive")"
 		mod="${filename%.*}"
 		outdir="$LIBRARY/$mod"
 
 		if [[ -e "$outdir" || -e "$outdir.disabled" ]]; then
-			printf '\e[33mSkipping existing directory\e[0m: %s\n' "$mod"
+			warn "skipping existing mod: $mod"
 			continue
 		fi
 
-		mkdir -p "$outdir"
+		mkdir -p -- "$outdir"
+		if ! extract_archive "$archive" "$outdir"; then
+			rm -rf -- "$outdir"
+			die "failed to extract: $archive"
+		fi
 
-		case "${archive##*.}" in
-			zip) unzip "$archive" -d "$outdir" ;;
-			7z) 7z x -o"$outdir" "$archive" ;;
-			rar) unrar x -op"$outdir" "$archive" ;;
-		esac
-
-		a_new+=("$mod")
+		added+=("$mod")
 	done
 
-	if [[ ${#a_new[@]} -gt 0 ]]; then
+	if ((${#added[@]} > 0)); then
 		echo "New mods added:"
-		for i in "${a_new[@]}"; do
-			echo "  $i"
+		local mod_name
+		for mod_name in "${added[@]}"; do
+			printf '  %s\n' "$mod_name"
 		done
 	else
-		echo "Nothing to do."
+		echo "No new mods added."
 	fi
 }
 
 check_package_structure() {
-	# dumb heuristic to try and
-	# assess if the extracted mod
-	# is in a subfolder
+	[[ -d "$LIBRARY" ]] || return 0
+
 	local error=0
+	local package
 	for package in "$LIBRARY"/*; do
 		[[ -d "$package" ]] || continue
-		local name="$(basename "$package")"
+
+		local name
+		name="$(basename -- "$package")"
 
 		[[ "$name" == *.disabled ]] && continue
-		
-		if [[ ! -d "$package/archive" &&
-			! -d "$package/bin" &&
-			! -d "$package/r6" &&
-			! -d "$package/red4ext" &&
-			! -d "$package/engine" &&
-			! -d "$package/mods" ]]; then
-		printf '\e[31mUnrecognized structure\e[0m: %s\n' "$(basename "$package")"
-		error=1
+
+		if ! known_package_root "$package"; then
+			printf '%serror:%s unrecognized mod structure: %s\n' "$RED" "$RESET" "$name" >&2
+			error=1
 		fi
 	done
+
 	return $error
 }
 
-remove_readmes() {
-	for package in "$LIBRARY"/*; do
-		rm -v "$package"/*.txt 2>/dev/null
-	done
+check_library() {
+	if check_package_structure; then
+		echo "Library looks okay."
+	else
+		die "fix library errors before assembling"
+	fi
 }
 
-assemble() {
+remove_readmes() {
+	require_dir "$LIBRARY" "library directory"
+
+	local removed=0
+	local package readme
+
+	for package in "$LIBRARY"/*; do
+		[[ -d "$package" ]] || continue
+
+		for readme in "$package"/*.txt; do
+			rm -v -- "$readme"
+			removed=1
+		done
+	done
+
+	((removed == 1)) || echo "No top-level .txt files found in Library."
+}
+
+require_safe_output() {
+	[[ -n "$OUTPUT" ]] || die "OUTPUT must not be empty"
+	[[ "$OUTPUT" != "/" ]] || die "OUTPUT must not be /"
+
+	local output_real source_real
+	output_real="$(realpath -m -- "$OUTPUT")"
+	source_real="$(realpath -m -- "$GAME_SOURCE")"
+
+	[[ "$output_real" != "$source_real" ]] || die "OUTPUT must differ from GAME_SOURCE"
+}
+
+require_cow_output_fs() {
 	local output_parent
-	output_parent="$(dirname "$OUTPUT")"
+	output_parent="$(dirname -- "$OUTPUT")"
+	require_dir "$output_parent" "output parent directory"
 
 	local fstype
 	fstype="$(df --output=fstype "$output_parent" | awk 'NR==2 { print $1 }')"
 
-	if [[ ! "$fstype" =~ ^(btrfs|zfs|xfs|bcachefs)$ ]]; then
-		echo "Unsupported or unknown filesystem: $fstype"
-		exit 69
-	fi
+	case "$fstype" in
+		btrfs | zfs | xfs | bcachefs) ;;
+		*) die "output parent must be on a reflink-friendly filesystem; found: ${fstype:-unknown}" ;;
+	esac
+}
+
+assemble() {
+	require_dir "$GAME_SOURCE" "game root"
+	mkdir -p -- "$LIBRARY"
+	require_safe_output
+	require_cow_output_fs
 
 	if ! check_package_structure; then
-		echo "Will not proceed due to errors."
-		exit 69
+		die "fix library errors before assembling"
 	fi
 
-	if [[ ! -d "$GAME_SOURCE" ]]; then
-		printf '\e[31mMissing game root\e[0m: %s\n' "$GAME_SOURCE"
-		exit 69
-	fi
-
-	gen_overwrite
+	maybe_generate_overwrite
 
 	local assembled="$OUTPUT"
 
 	rm -rf -- "${assembled:?}"
 	mkdir -p -- "${assembled}"
 
-	#printf '\e[32mCopying vanilla game\e[0m: %s\n' "$GAME_SOURCE"
+	printf 'Copying vanilla game: %s\n' "$GAME_SOURCE"
 	cp -a --reflink=auto -- "$GAME_SOURCE"/. "$assembled"/.
-	chmod -R u+w "$assembled"
+	chmod -R u+w -- "$assembled"
 
-	printf 'Assembling mods'
-        
-	local total="$(find "$LIBRARY" -maxdepth 1 -mindepth 1 -type d ! -name '*.disabled' | wc -l)"
+	local total
+	total="$(enabled_packages | wc -l)"
 	local n=1
+	local package name
+
+	if ((total == 0)); then
+		echo "No enabled mods found; output is a vanilla copy."
+		save_manifest
+		return
+	fi
 
 	for package in "$LIBRARY"/*; do
 		[[ -d "$package" ]] || continue
 
-		local name="$(basename "$package")"
+		name="$(basename -- "$package")"
+		[[ "$name" == *.disabled ]] && continue
 
-		if [[ "$name" == *.disabled ]]; then
-			#printf '\e[33mDisabled\e[0m:   %q\n' "$name"
-			continue
-		fi
-
-		#printf '\e[32mOverlaying\e[0m: %s\n' "$name"
-  		printf '\r\033[KAssembling mod %d/%d' "$n" "$total"
+		printf 'Assembling mod %d/%d: %s\n' "$n" "$total" "$name"
 		cp -a --reflink=auto -- "$package"/. "$assembled"/.
-		((n++))
+		((n += 1))
 	done
-	printf '\n'
 
 	save_manifest
 }
 
 gen_manifest() {
+	require_dir "$OUTPUT" "modded game directory"
 	find "$OUTPUT" -mindepth 1 -printf '%y\t%P\t%s\t%T@\t%m\t%u\t%g\t%l\n' | LC_ALL=C sort
 }
 
 save_manifest() {
-	printf "Recording game state..."
+	printf 'Recording game state... '
 	gen_manifest > "$MANIFEST"
-	printf " saved to '%s'\n" "$MANIFEST"
+	printf 'saved to %s\n' "$MANIFEST"
+}
+
+require_manifest() {
+	[[ -f "$MANIFEST" ]] || die "missing manifest: $MANIFEST"
+}
+
+manifest_changes() {
+	require_manifest
+	gen_manifest | LC_ALL=C comm -13 "$MANIFEST" -
 }
 
 diff_manifest() {
-	if [[ -f "$MANIFEST" ]]; then
-		gen_manifest | LC_ALL=C comm -13 "$MANIFEST" -
-	fi
+	manifest_changes
 }
 
-gen_overwrite() {
-	# author's note:
-	#   overwrite mods are only additive.
-	#   files removed are not tracked,
-	#   and neither are empty directories.
+create_overwrite() {
+	local changed_files=()
+	mapfile -t changed_files < <(manifest_changes | awk -F '\t' '$1 != "d" { print $2 }')
 
-	if [[ ! -f "$MANIFEST" ]]; then
-		[[ "$1" == "-i" ]] && echo "No manifest found at '$MANIFEST', have you assembled your mods yet?"
+	if ((${#changed_files[@]} == 0)); then
+		echo "Game folder appears unchanged; nothing to pack."
 		return
 	fi
 
-	local overwrite_mod="$LIBRARY/zzzz-overwrite-$(date +%s)"
-	local diff="$(diff_manifest | sed '/^d/d' | awk -F '\t' '{ print $2 }')"
-	[[ -z "$diff" && "$1" == "-i" ]] && echo "Game folder appears unchanged, nothing to do." && return
-	[[ -z "$diff" ]] && return
+	mkdir -p -- "$LIBRARY"
 
-	echo "Packing new overwrite mod to '$overwrite_mod'"
+	local overwrite_mod
+	overwrite_mod="$LIBRARY/zzzz-overwrite-$(date +%s)"
 
-	echo "$diff" | while read -r file; do
-		install -D "$OUTPUT/$file" "$overwrite_mod/$file"
-		echo " + $file"
+	printf 'Packing overwrite mod: %s\n' "$overwrite_mod"
+
+	local file target_dir
+	for file in "${changed_files[@]}"; do
+		target_dir="$(dirname -- "$overwrite_mod/$file")"
+		mkdir -p -- "$target_dir"
+		cp -a -- "$OUTPUT/$file" "$overwrite_mod/$file"
+		printf '  + %s\n' "$file"
 	done
+}
+
+maybe_generate_overwrite() {
+	[[ -f "$MANIFEST" ]] || return 0
+
+	if [[ ! -d "$OUTPUT" ]]; then
+		warn "manifest exists but modded game directory is missing; skipping overwrite generation"
+		return 0
+	fi
+
+	create_overwrite
+}
+
+generate_overwrite() {
+	require_manifest
+	require_dir "$OUTPUT" "modded game directory"
+	create_overwrite
 }
 
 main "$@"
