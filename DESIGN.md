@@ -1,0 +1,3 @@
+# Design Philosophy
+
+`kiss-me.sh` should stay small, boring, and legible: prefer explicit shell commands over clever abstraction, keep the CLI scriptable before adding interactive polish, treat the filesystem as the source of truth, and only add helpers when they remove real repetition or make dangerous operations safer. Favor clear command names, predictable exit behavior, and plain status messages; avoid compatibility shims for unreleased behavior, avoid new dependencies unless they unlock obvious value, and let future UX like menus or TUIs sit on top of simple commands rather than becoming the architecture.
