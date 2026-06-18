@@ -1,0 +1,8 @@
+__pycache__/
+.pytest_cache/
+
+# Local mod-manager state.
+Downloads/
+Library/
+.manifest
+kiss-me.ini
