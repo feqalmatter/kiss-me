@@ -36,6 +36,8 @@ usage() {
 	printf 'commands:\n'
 	printf '  assemble            build a fresh modded game directory\n'
 	printf '  extract-downloads   unpack archives from Downloads into Library\n'
+	printf '  enable <mod>        enable a mod package\n'
+	printf '  disable <mod>       disable a mod package\n'
 	printf '  check-library       check enabled mod directory structure\n'
 	printf '  generate-overwrite  pack local game changes as an overwrite mod\n'
 	printf '  save-manifest       record the current modded game state\n'
@@ -71,8 +73,30 @@ require_dir() {
 	[[ -d "$dir" ]] || die "missing $label: $dir"
 }
 
+require_args() {
+	local expected=$1
+	local command=$2
+	shift 2
+
+	if (($# != expected)); then
+		usage >&2
+		die "$command expects $expected argument(s)"
+	fi
+}
+
 enabled_packages() {
 	find "$LIBRARY" -maxdepth 1 -mindepth 1 -type d ! -name '*.disabled'
+}
+
+mod_name() {
+	local name=$1
+	name="${name%.disabled}"
+
+	[[ -n "$name" ]] || die "mod name must not be empty"
+	[[ "$name" != */* ]] || die "mod name must not contain /"
+	[[ "$name" != "." && "$name" != ".." ]] || die "invalid mod name: $name"
+
+	printf '%s\n' "$name"
 }
 
 known_package_root() {
@@ -92,23 +116,23 @@ main() {
 		exit 1
 	fi
 
-	if (($# > 1)); then
-		usage >&2
-		die "too many arguments"
-	fi
+	local command=$1
+	shift
 
-	case "$1" in
-		assemble) assemble ;;
-		extract-downloads) extract_downloads ;;
-		check-library) check_library ;;
-		generate-overwrite) generate_overwrite ;;
-		save-manifest) save_manifest ;;
-		diff-manifest) diff_manifest ;;
-		remove-readmes) remove_readmes ;;
-		help | -h | --help) usage ;;
+	case "$command" in
+		assemble) require_args 0 "$command" "$@"; assemble ;;
+		extract-downloads) require_args 0 "$command" "$@"; extract_downloads ;;
+		enable) require_args 1 "$command" "$@"; enable_mod "$1" ;;
+		disable) require_args 1 "$command" "$@"; disable_mod "$1" ;;
+		check-library) require_args 0 "$command" "$@"; check_library ;;
+		generate-overwrite) require_args 0 "$command" "$@"; generate_overwrite ;;
+		save-manifest) require_args 0 "$command" "$@"; save_manifest ;;
+		diff-manifest) require_args 0 "$command" "$@"; diff_manifest ;;
+		remove-readmes) require_args 0 "$command" "$@"; remove_readmes ;;
+		help | -h | --help) require_args 0 "$command" "$@"; usage ;;
 		*)
 			usage >&2
-			die "unknown command: $1"
+			die "unknown command: $command"
 			;;
 	esac
 }
@@ -208,6 +232,48 @@ check_library() {
 	else
 		die "fix library errors before assembling"
 	fi
+}
+
+enable_mod() {
+	require_dir "$LIBRARY" "library directory"
+
+	local name
+	name="$(mod_name "$1")"
+
+	local enabled="$LIBRARY/$name"
+	local disabled="$enabled.disabled"
+
+	if [[ -d "$enabled" ]]; then
+		echo "Already enabled: $name"
+		return
+	fi
+
+	[[ ! -e "$enabled" ]] || die "enable target exists and is not a directory: $enabled"
+	[[ ! -e "$disabled" || -d "$disabled" ]] || die "disabled mod exists and is not a directory: $disabled"
+	[[ -d "$disabled" ]] || die "mod not found: $name"
+	mv -- "$disabled" "$enabled"
+	echo "Enabled: $name"
+}
+
+disable_mod() {
+	require_dir "$LIBRARY" "library directory"
+
+	local name
+	name="$(mod_name "$1")"
+
+	local enabled="$LIBRARY/$name"
+	local disabled="$enabled.disabled"
+
+	if [[ -d "$disabled" ]]; then
+		echo "Already disabled: $name"
+		return
+	fi
+
+	[[ ! -e "$disabled" ]] || die "disable target exists and is not a directory: $disabled"
+	[[ ! -e "$enabled" || -d "$enabled" ]] || die "enabled mod exists and is not a directory: $enabled"
+	[[ -d "$enabled" ]] || die "mod not found: $name"
+	mv -- "$enabled" "$disabled"
+	echo "Disabled: $name"
 }
 
 remove_readmes() {
